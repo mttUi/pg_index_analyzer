@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>pg_index_analyzer</title>
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: 'Segoe UI', system-ui, sans-serif; font-size: 14px; background: #f5f6f8; color: #1a1a2e; }
+
+.header { background: #1a1a2e; color: #fff; padding: 20px 32px; display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+.header-title { font-size: 20px; font-weight: 600; letter-spacing: -.3px; }
+.header-sub { font-size: 12px; color: rgba(255,255,255,.5); margin-top: 2px; }
+.header-spacer { flex: 1; }
+.header-time { font-size: 12px; color: rgba(255,255,255,.4); }
+
+.container { max-width: 1100px; margin: 0 auto; padding: 24px 24px 48px; }
+
+.metrics { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 24px; }
+.metric { background: #fff; border-radius: 10px; padding: 16px 20px; border: 1px solid #e8eaed; }
+.metric-label { font-size: 11px; color: #6b7280; text-transform: uppercase; letter-spacing: .5px; margin-bottom: 6px; }
+.metric-val { font-size: 26px; font-weight: 600; overflow-wrap: anywhere; }
+.metric-val.small { font-size: 18px; }
+.metric-val.red { color: #dc2626; }
+.metric-val.green { color: #16a34a; }
+.metric-val.blue { color: #2563eb; }
+.metric-sub { font-size: 12px; color: #6b7280; margin-top: 4px; }
+
+.section { background: #fff; border-radius: 12px; border: 1px solid #e8eaed; margin-bottom: 16px; overflow: hidden; }
+.section-head { display: flex; align-items: center; gap: 10px; padding: 14px 20px; border-bottom: 1px solid #f0f1f3; background: #fafafa; }
+.section-icon { font-size: 17px; }
+.section-title { font-size: 14px; font-weight: 600; flex: 1; }
+.note { padding: 10px 20px; font-size: 12px; color: #6b7280; border-bottom: 1px solid #f0f1f3; }
+
+.badge { display: inline-flex; align-items: center; font-size: 11px; font-weight: 600; padding: 3px 9px; border-radius: 20px; }
+.badge.danger { background: #fef2f2; color: #dc2626; }
+.badge.ok { background: #f0fdf4; color: #16a34a; }
+
+.table-wrap { overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; font-size: 13px; }
+th { text-align: left; padding: 10px 20px; color: #6b7280; font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: .4px; background: #f9fafb; border-bottom: 1px solid #f0f1f3; white-space: nowrap; }
+td { padding: 10px 20px; border-bottom: 1px solid #f7f8f9; color: #1a1a2e; }
+tr:last-child td { border-bottom: none; }
+tr:hover td { background: #fafbfc; }
+.row-danger td { background: #fef9f9 !important; }
+.row-danger:hover td { background: #fef2f2 !important; }
+.row-warn td { background: #fffef5 !important; }
+.row-warn:hover td { background: #fffbeb !important; }
+td.empty, p.empty { color: #9ca3af; font-style: italic; text-align: center; padding: 20px; }
+
+.charts { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px; }
+.chart-card { background: #fff; border-radius: 12px; border: 1px solid #e8eaed; padding: 20px; }
+.chart-title { font-size: 13px; font-weight: 600; margin-bottom: 14px; color: #374151; }
+.chart-box { position: relative; height: 260px; }
+
+.no-data { background: #fff; border-radius: 12px; border: 1px solid #e8eaed; padding: 32px; text-align: center; line-height: 1.7; }
+.no-data code { background: #f3f4f6; padding: 2px 6px; border-radius: 4px; }
+
+.footer { text-align: center; font-size: 12px; color: #9ca3af; margin-top: 32px; }
+
+@media (max-width: 700px) {
+  .header { padding: 16px; }
+  .container { padding: 16px 16px 40px; }
+  .metrics { grid-template-columns: 1fr 1fr; }
+  .charts { grid-template-columns: 1fr; }
+}
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div>
+    <div class="header-title">🔍 pg_index_analyzer</div>
+    <div class="header-sub">Анализ индексов PostgreSQL<span id="db-sub"></span></div>
+  </div>
+  <div class="header-spacer"></div>
+  <div class="header-time" id="generated"></div>
+</div>
+
+<div class="container">
+
+  <div class="no-data" id="no-data" hidden>
+    <p><b>Данных для отчёта пока нет.</b></p>
+    <p>Запустите анализатор командой <code>python main.py</code> и обновите эту страницу (F5).</p>
+    <p>Он создаст рядом файл <code>report_data.js</code>, из которого страница берёт данные.</p>
+  </div>
+
+  <div id="report" hidden>
+    <div class="metrics" id="metrics"></div>
+    <div class="charts">
+      <div class="chart-card">
+        <div class="chart-title">Топ индексов по числу сканирований</div>
+        <div id="chart-usage"></div>
+      </div>
+      <div class="chart-card">
+        <div class="chart-title">Доля мёртвых кортежей по таблицам, %</div>
+        <div id="chart-bloat"></div>
+      </div>
+    </div>
+    <div id="sections"></div>
+  </div>
+
+  <div class="footer">
+    Курсовая работа «Влияние различных стратегий индексирования на производительность» ·
+    БФУ им. Иммануила Канта · 2026
+  </div>
+</div>
+
+<script src="report_data.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+<script>
+"use strict";
+
+const ROW_CLASS = { ok: "", warn: "row-warn", danger: "row-danger" };
+const CHART_COLOR = { ok: "#4ade80", warn: "#fcd34d", danger: "#fca5a5" };
+
+// Описание разделов отчёта: ключ в данных, заголовок, колонки.
+const SECTIONS = [
+  { key: "unused", icon: "🚫", title: "Неиспользуемые индексы",
+    note: d => d.stats_note, badge: ["индекс", "индекса", "индексов"],
+    empty: "✓ Неиспользуемых индексов нет",
+    cols: [["tablename", "Таблица"], ["indexname", "Индекс"], ["index_size", "Размер"],
+           ["idx_scan", "Сканирований"]] },
+  { key: "redundant", icon: "📋", title: "Лишние индексы (дубли и префиксы)",
+    badge: ["индекс", "индекса", "индексов"], empty: "✓ Лишних индексов нет",
+    cols: [["tablename", "Таблица"], ["indexname", "Лишний индекс"], ["kept_index", "Покрывается"],
+           ["kind", "Тип"], ["index_size", "Размер"]] },
+  { key: "bloat", icon: "🧹", title: "Раздувание таблиц (мёртвые кортежи)",
+    empty: "✓ Мёртвых кортежей практически нет",
+    cols: [["tablename", "Таблица"], ["n_live_tup", "Живых строк"], ["n_dead_tup", "Мёртвых строк"],
+           ["dead_ratio_pct", "% мёртвых"], ["last_autovacuum", "Последний autovacuum"]] },
+  { key: "missing", icon: "🔍", title: "Таблицы с возможно отсутствующими индексами",
+    empty: "✓ Подозрительных Seq Scan нет",
+    cols: [["tablename", "Таблица"], ["seq_scan", "Seq Scan"], ["idx_scan", "Index Scan"],
+           ["avg_rows_per_seqscan", "Ср. строк/скан"], ["table_size", "Размер"]] },
+  { key: "cache", icon: "💾", title: "Коэффициент попаданий в кэш",
+    empty: d => `Недостаточно обращений для оценки (порог: ${d.cache_min_access})`,
+    cols: [["index_name", "Индекс"], ["table_name", "Таблица"], ["idx_blks_hit", "Попаданий в кэш"],
+           ["idx_blks_read", "Чтений с диска"], ["cache_hit_pct", "% кэша"]] },
+  { key: "usage", icon: "📊", title: "Полная статистика использования",
+    empty: "Индексов нет",
+    cols: [["tablename", "Таблица"], ["indexname", "Индекс"], ["idx_scan", "Сканирований"],
+           ["idx_tup_read", "Прочитано строк"], ["index_size", "Размер"], ["usage_label", "Статус"]] },
+];
+
+// Создаёт элемент. Текст вставляется через append (как textContent), поэтому
+// имена таблиц и индексов не могут сломать разметку.
+function el(tag, attrs, ...children) {
+  const node = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs || {})) {
+    if (k === "class") node.className = v;
+    else node.setAttribute(k, v);
+  }
+  for (const c of children) if (c !== null && c !== undefined) node.append(c);
+  return node;
+}
+
+const cell = v => (v === null || v === undefined) ? "—" : String(v);   // 0 остаётся нулём
+const resolve = (v, d) => typeof v === "function" ? v(d) : v;
+
+function plural(n, one, few, many) {
+  n = Math.abs(Math.trunc(n));
+  if (n % 100 >= 11 && n % 100 <= 14) return many;
+  const r = n % 10;
+  return r === 1 ? one : (r >= 2 && r <= 4) ? few : many;
+}
+
+// ── построение частей страницы ──
+
+function metric(label, value, color, sub, small) {
+  return el("div", { class: "metric" },
+    el("div", { class: "metric-label" }, label),
+    el("div", { class: `metric-val ${color}${small ? " small" : ""}` }, cell(value)),
+    sub ? el("div", { class: "metric-sub" }, sub) : null);
+}
+
+function table(rows, cols, emptyText) {
+  const head = el("tr", {}, ...cols.map(([, label]) => el("th", {}, label)));
+  const body = el("tbody");
+  if (!rows.length) {
+    body.append(el("tr", {}, el("td", { colspan: cols.length, class: "empty" }, emptyText)));
+  }
+  for (const r of rows) {
+    body.append(el("tr", { class: ROW_CLASS[r.level] || "" },
+      ...cols.map(([key]) => el("td", {}, cell(r[key])))));
+  }
+  return el("div", { class: "table-wrap" }, el("table", {}, el("thead", {}, head), body));
+}
+
+function section(def, d) {
+  const rows = d.sections[def.key] || [];
+  const badge = def.badge
+    ? el("span", { class: `badge ${rows.length ? "danger" : "ok"}` },
+         `${rows.length} ${plural(rows.length, ...def.badge)}`)
+    : null;
+  const note = def.note ? el("div", { class: "note" }, resolve(def.note, d)) : null;
+  return el("div", { class: "section" },
+    el("div", { class: "section-head" },
+      el("span", { class: "section-icon" }, def.icon),
+      el("span", { class: "section-title" }, def.title),
+      badge),
+    note,
+    table(rows, def.cols, resolve(def.empty, d)));
+}
+
+function barChart(container, rows, labelKey, valueKey, series, emptyText) {
+  if (!rows.length) {
+    container.append(el("p", { class: "empty" }, emptyText));
+    return;
+  }
+  if (typeof Chart === "undefined") {
+    container.append(el("p", { class: "empty" }, "График не загрузился: для Chart.js нужен интернет"));
+    return;
+  }
+  const canvas = el("canvas");
+  container.append(el("div", { class: "chart-box" }, canvas));
+  new Chart(canvas, {
+    type: "bar",
+    data: {
+      labels: rows.map(r => r[labelKey]),
+      datasets: [{ label: series, data: rows.map(r => r[valueKey]),
+                   backgroundColor: rows.map(r => CHART_COLOR[r.level] || CHART_COLOR.ok),
+                   borderRadius: 4, borderSkipped: false }]
+    },
+    options: {
+      indexAxis: "y", responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { display: false } },
+      scales: {
+        x: { beginAtZero: true, ticks: { font: { size: 11 } }, grid: { color: "#f3f4f6" } },
+        y: { ticks: { font: { size: 11 } }, grid: { display: false } }
+      }
+    }
+  });
+}
+
+// ── запуск ──
+
+function render(d) {
+  const db = d.db || {};
+  const s = d.summary || {};
+  document.title = `pg_index_analyzer — ${cell(db.dbname)}`;
+  document.getElementById("db-sub").textContent = ` · ${cell(db.dbname)}`;
+  document.getElementById("generated").textContent = `Отчёт сформирован: ${cell(d.generated_at)}`;
+
+  document.getElementById("metrics").append(
+    metric("База данных", db.dbname, "blue", null, true),
+    metric("Размер БД", db.db_size, "blue"),
+    metric("Индексов всего", db.index_count, "blue"),
+    metric("Проблем найдено", s.total, s.total ? "red" : "green",
+           s.reclaimable_bytes ? `можно освободить ~${s.reclaimable_pretty}` : null));
+
+  const used = (d.sections.usage || []).filter(r => (r.idx_scan || 0) > 0).slice(0, 12);
+  barChart(document.getElementById("chart-usage"), used, "indexname", "idx_scan",
+           "Сканирований", "Сканирований пока нет");
+  barChart(document.getElementById("chart-bloat"), d.sections.bloat || [], "tablename", "dead_ratio_pct",
+           "% мёртвых", "Мёртвых кортежей нет");
+
+  const box = document.getElementById("sections");
+  for (const def of SECTIONS) box.append(section(def, d));
+
+  document.getElementById("report").hidden = false;
+}
+
+if (window.REPORT_DATA && window.REPORT_DATA.sections) {
+  render(window.REPORT_DATA);
+} else {
+  document.getElementById("no-data").hidden = false;
+}
+</script>
+</body>
+</html>
